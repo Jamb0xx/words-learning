@@ -1,0 +1,6 @@
+{
+  "name": "WordKid English",
+  "description": "Word learning app for kids with flashcards, translation quizzes, spelling, and voice training",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,23 +1,32 @@
 package com.example.wordkid;
 
-import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.speech.tts.TextToSpeech;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,11 +36,12 @@ import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
 
-public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
+public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
     private static final int SESSION_SIZE = 20;
     private final Random random = new Random();
     private DBHelper db;
     private TextToSpeech tts;
+    private boolean isTtsReady = false;
     private SharedPreferences prefs;
     private boolean onHome = true;
 
@@ -41,14 +51,30 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         db = new DBHelper(this);
         prefs = getSharedPreferences("stats", MODE_PRIVATE);
         tts = new TextToSpeech(this, this);
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (!onHome) {
+                    showHome();
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                }
+            }
+        });
+
         showHome();
     }
 
     @Override
     public void onInit(int status) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.setLanguage(Locale.US);
+            int res = tts.setLanguage(Locale.US);
+            isTtsReady = (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED);
             tts.setSpeechRate(0.85f);
+        } else {
+            isTtsReady = false;
         }
     }
 
@@ -60,12 +86,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
         db.close();
         super.onDestroy();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (!onHome) showHome();
-        else super.onBackPressed();
     }
 
     private void showHome() {
@@ -94,9 +114,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private void startCards() {
-        onHome = false;
         List<Word> session = sessionWords();
-        if (session.isEmpty()) return;
+        if (session.isEmpty()) {
+            Toast.makeText(this, "Словарь пуст! Добавьте слова в Мои слова.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        onHome = false;
         showCard(session, 0, false);
     }
 
@@ -132,9 +155,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private void startTyping(boolean listening) {
-        onHome = false;
         List<Word> session = sessionWords();
-        if (session.isEmpty()) return;
+        if (session.isEmpty()) {
+            Toast.makeText(this, "Словарь пуст! Добавьте слова в Мои слова.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        onHome = false;
         showTypingQuestion(session, 0, 0, 0, listening);
     }
 
@@ -156,7 +182,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             hint.setGravity(Gravity.CENTER);
             hint.setPadding(0, 0, 0, dp(16));
             root.addView(hint);
-            root.postDelayed(() -> speak(w.en), 300);
+            root.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    speak(w.en);
+                }
+            }, 300);
         } else {
             TextView prompt = bigWord(w.ru);
             prompt.setTextSize(32);
@@ -168,11 +198,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
 
         EditText answer = new EditText(this);
-        answer.setTextSize(22);
-        answer.setSingleLine(true);
+        answer.setTextSize(20);
+        answer.setMaxLines(1);
+        answer.setLines(1);
         answer.setHint("English");
         answer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        answer.setPadding(dp(16), dp(12), dp(16), dp(12));
+        answer.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        answer.setPadding(dp(16), dp(14), dp(16), dp(14));
         root.addView(answer, matchWrap());
 
         TextView feedback = text("");
@@ -203,9 +235,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 feedback.setText("Правильно! ✓");
                 feedback.setTextColor(Color.rgb(34, 139, 94));
             } else {
-                feedback.setText("Правильный ответ: " + w.en);
+                feedback.setText(String.format(Locale.getDefault(), "Правильный ответ: %s", w.en));
                 feedback.setTextColor(Color.rgb(190, 55, 55));
-                session.add(w); // ошибочное слово вернётся ещё раз в конце
+                session.add(w);
             }
             Button next = primaryButton(ok ? "Дальше" : "Запомнить и дальше", vv ->
                     showTypingQuestion(session, index + 1, correct + (ok ? 1 : 0), wrong + (ok ? 0 : 1), listening));
@@ -217,9 +249,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private void startChoice() {
-        onHome = false;
         List<Word> session = sessionWords();
-        if (session.isEmpty()) return;
+        if (session.isEmpty()) {
+            Toast.makeText(this, "Словарь пуст! Добавьте слова в Мои слова.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        onHome = false;
         showChoiceQuestion(session, 0, 0, 0);
     }
 
@@ -253,7 +288,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     feedback.setText("Правильно! ✓");
                     feedback.setTextColor(Color.rgb(34, 139, 94));
                 } else {
-                    feedback.setText("Правильный ответ: " + w.ru);
+                    feedback.setText(String.format(Locale.getDefault(), "Правильный ответ: %s", w.ru));
                     feedback.setTextColor(Color.rgb(190, 55, 55));
                     session.add(w);
                 }
@@ -271,8 +306,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         LinearLayout root = page();
         root.addView(title("🎉 " + heading));
         TextView result;
-        if (wrong == 0) result = text("Отличная работа!");
-        else result = text("Правильных ответов: " + correct + "\nОшибок: " + wrong + "\nОшибочные слова уже были добавлены на повторение в этой тренировке.");
+        if (wrong == 0) {
+            result = text("Отличная работа!");
+        } else {
+            result = text(String.format(Locale.getDefault(),
+                    "Правильных ответов: %d\nОшибок: %d\nОшибочные слова уже были добавлены на повторение в этой тренировке.", correct, wrong));
+        }
         result.setTextSize(20);
         result.setGravity(Gravity.CENTER);
         result.setPadding(0, dp(24), 0, dp(24));
@@ -296,15 +335,15 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         for (Word w : words) {
             TextView row = text(w.en + "   —   " + w.ru + (w.custom ? "  ★" : ""));
-            row.setTextSize(17);
-            row.setPadding(dp(12), dp(12), dp(12), dp(12));
-            row.setBackgroundColor(Color.rgb(247, 247, 250));
+            row.setTextSize(16);
+            row.setPadding(dp(14), dp(14), dp(14), dp(14));
+            row.setBackgroundResource(R.drawable.bg_word_card);
             LinearLayout.LayoutParams lp = matchWrap();
-            lp.setMargins(0, 0, 0, dp(6));
+            lp.setMargins(0, 0, 0, dp(8));
             root.addView(row, lp);
             if (w.custom) {
                 row.setOnLongClickListener(v -> {
-                    new AlertDialog.Builder(this)
+                    new MaterialAlertDialogBuilder(this)
                             .setTitle("Удалить слово?")
                             .setMessage(w.en + " — " + w.ru)
                             .setNegativeButton("Отмена", null)
@@ -325,35 +364,45 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         box.setPadding(dp(22), dp(6), dp(22), 0);
         EditText en = new EditText(this);
         en.setHint("English: apple");
-        en.setSingleLine(true);
+        en.setMaxLines(1);
+        en.setLines(1);
+        en.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+
         EditText ru = new EditText(this);
         ru.setHint("Русский: яблоко");
-        ru.setSingleLine(true);
+        ru.setMaxLines(1);
+        ru.setLines(1);
+        ru.setInputType(InputType.TYPE_CLASS_TEXT);
+
         box.addView(en, matchWrap());
         box.addView(ru, matchWrap());
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("Новое слово")
                 .setView(box)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Добавить", null)
                 .create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (en.getText().toString().trim().isEmpty() || ru.getText().toString().trim().isEmpty()) {
+            String enText = en.getText().toString().trim();
+            String ruText = ru.getText().toString().trim();
+            if (enText.isEmpty() || ruText.isEmpty()) {
                 Toast.makeText(this, "Заполни оба поля", Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (db.addWord(en.getText().toString(), ru.getText().toString())) {
+            if (db.addWord(enText, ruText)) {
                 dialog.dismiss();
                 showWords();
-            } else Toast.makeText(this, "Такое слово уже есть", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Такое слово уже есть", Toast.LENGTH_SHORT).show();
+            }
         }));
         dialog.show();
     }
 
     private void showImportDialog() {
         EditText input = new EditText(this);
-        input.setHint("apple=яблоко\ndog=собака\nbook=книга");
+        input.setHint("apple=яблоко\ndog=собака\nbook=книга\ncat - кошка");
         input.setMinLines(8);
         input.setGravity(Gravity.TOP);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
@@ -362,9 +411,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         box.setPadding(pad, 0, pad, 0);
         box.addView(input, matchWrap());
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Импорт слов")
-                .setMessage("По одной паре на строку. Разделитель: =, ; или табуляция.")
+                .setMessage("По одной паре на строку. Разделители: =, ;, табуляция или дефис ( - ).")
                 .setView(box)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Импорт", (d, which) -> {
@@ -386,13 +435,15 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         TextView stats = bigWord(attempts == 0 ? "Пока нет ответов" : percent + "%");
         stats.setTextSize(48);
         root.addView(stats);
-        TextView details = text("Всего ответов: " + attempts + "\nПравильно: " + correct + "\nОшибок: " + wrong + "\nСлов в словаре: " + db.getAllWords().size());
+        TextView details = text(String.format(Locale.getDefault(),
+                "Всего ответов: %d\nПравильно: %d\nОшибок: %d\nСлов в словаре: %d",
+                attempts, correct, wrong, db.getAllWords().size()));
         details.setTextSize(20);
         details.setGravity(Gravity.CENTER);
         details.setLineSpacing(dp(6), 1f);
         details.setPadding(0, dp(15), 0, dp(25));
         root.addView(details);
-        root.addView(secondaryButton("Сбросить статистику", v -> new AlertDialog.Builder(this)
+        root.addView(secondaryButton("Сбросить статистику", v -> new MaterialAlertDialogBuilder(this)
                 .setTitle("Сбросить статистику?")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Сбросить", (d, w) -> {
@@ -406,7 +457,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private List<Word> sessionWords() {
         List<Word> words = db.getAllWords();
         Collections.shuffle(words);
-        if (words.size() > SESSION_SIZE) words = new ArrayList<>(words.subList(0, SESSION_SIZE));
+        if (words.size() > SESSION_SIZE) {
+            words = new ArrayList<>(words.subList(0, SESSION_SIZE));
+        }
         return new ArrayList<>(words);
     }
 
@@ -425,7 +478,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private void speak(String word) {
-        if (tts != null) tts.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word");
+        if (tts != null && isTtsReady && !isFinishing() && !isDestroyed()) {
+            tts.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_" + System.currentTimeMillis());
+        }
     }
 
     private void recordAttempt(boolean correct) {
@@ -440,12 +495,15 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void hideKeyboard(View v) {
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+        }
     }
 
     private ScrollView wrap(LinearLayout content) {
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
+        sv.setBackgroundColor(Color.WHITE);
         sv.addView(content, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         return sv;
     }
@@ -456,6 +514,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(20), dp(24), dp(20), dp(28));
         root.setBackgroundColor(Color.WHITE);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(dp(20), Math.max(dp(24), systemBars.top + dp(12)), dp(20), Math.max(dp(28), systemBars.bottom + dp(16)));
+            return insets;
+        });
         return root;
     }
 
@@ -494,7 +557,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private Button menuButton(String label, View.OnClickListener l) {
-        Button b = primaryButton(label, l);
+        MaterialButton b = (MaterialButton) primaryButton(label, l);
         b.setTextSize(18);
         LinearLayout.LayoutParams lp = matchWrap();
         lp.height = dp(58);
@@ -504,12 +567,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private Button primaryButton(String label, View.OnClickListener l) {
-        Button b = new Button(this);
+        MaterialButton b = new MaterialButton(this);
         b.setText(label);
         b.setTextSize(17);
         b.setAllCaps(false);
+        b.setCornerRadius(dp(14));
         b.setTextColor(Color.WHITE);
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(66, 85, 255)));
+        b.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(66, 85, 255)));
         if (l != null) b.setOnClickListener(l);
         LinearLayout.LayoutParams lp = matchWrap();
         lp.setMargins(0, dp(6), 0, dp(6));
@@ -518,12 +582,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private Button secondaryButton(String label, View.OnClickListener l) {
-        Button b = new Button(this);
+        MaterialButton b = new MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle);
         b.setText(label);
         b.setTextSize(16);
         b.setAllCaps(false);
+        b.setCornerRadius(dp(14));
         b.setTextColor(Color.rgb(50, 60, 100));
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(237, 239, 255)));
+        b.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(237, 239, 255)));
         if (l != null) b.setOnClickListener(l);
         LinearLayout.LayoutParams lp = matchWrap();
         lp.setMargins(0, dp(5), 0, dp(5));
@@ -532,12 +597,13 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private Button choiceButton(String label) {
-        Button b = new Button(this);
+        MaterialButton b = new MaterialButton(this, null, com.google.android.material.R.attr.borderlessButtonStyle);
         b.setText(label);
         b.setTextSize(18);
         b.setAllCaps(false);
+        b.setCornerRadius(dp(14));
         b.setTextColor(Color.rgb(45, 50, 70));
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(244, 245, 249)));
+        b.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(244, 245, 249)));
         LinearLayout.LayoutParams lp = matchWrap();
         lp.height = dp(58);
         lp.setMargins(0, dp(5), 0, dp(5));

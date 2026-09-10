@@ -59,10 +59,21 @@ public class DBHelper extends SQLiteOpenHelper {
                 String cleaned = line.trim();
                 if (cleaned.isEmpty()) continue;
                 String[] parts;
-                if (cleaned.contains("=")) parts = cleaned.split("=", 2);
-                else if (cleaned.contains(";")) parts = cleaned.split(";", 2);
-                else if (cleaned.contains("\\t")) parts = cleaned.split("\\t", 2);
-                else continue;
+                if (cleaned.contains("=")) {
+                    parts = cleaned.split("=", 2);
+                } else if (cleaned.contains(";")) {
+                    parts = cleaned.split(";", 2);
+                } else if (cleaned.contains("\t")) {
+                    parts = cleaned.split("\t", 2);
+                } else if (cleaned.contains("\\t")) {
+                    parts = cleaned.split("\\\\t", 2);
+                } else if (cleaned.contains(" — ")) {
+                    parts = cleaned.split(" — ", 2);
+                } else if (cleaned.contains(" - ")) {
+                    parts = cleaned.split(" - ", 2);
+                } else {
+                    continue;
+                }
                 String en = parts[0].trim();
                 String ru = parts[1].trim();
                 if (en.isEmpty() || ru.isEmpty()) continue;
